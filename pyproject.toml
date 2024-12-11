@@ -9,6 +9,7 @@ packages = [{include = "monte-carlo"}]
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0.0"
 numpy = "^2.2.0"
+matplotlib = "^3.9.3"
 
 
 [build-system]
