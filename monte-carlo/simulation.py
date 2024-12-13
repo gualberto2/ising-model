@@ -1,80 +1,113 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from numba import njit
+from tqdm import tqdm
 
-# Parameters
-L = 20  # system size
-T = 2.3 # temperature
-J = 1.0 # interaction strength
-kB = 1.0 # Boltzmann constant set to 1
-steps = 100000 # number of spin flips attempts
+# Physical constants and parameters
+J = 1.0      # Interaction strength
+kB = 1.0     # Boltzmann constant
+# Problem parameters
+L_values = [10, 16, 24, 36]
+T_min, T_max, T_step = 0.015, 4.5, 0.015
 
-# Initialize spins randomly
-spins = np.random.choice([-1, 1], size=(L, L))
+# Simulation parameters
+equil_sweeps = 100000      # Number of sweeps for thermalization
+measurement_sweeps = 300000  # Number of sweeps for measurement
+measure_interval = 10        # Measure energy, magnetization every 10 sweeps
 
-def energy(spins):
-    E = 0
-    # sum over each spin and its right & down neighbor (to avoid double counting)
+def initialize_spins(L):
+    # Initialize spins randomly: returns a int32 array for Numba compatibility
+    return np.random.choice([-1, 1], size=(L, L)).astype(np.int32)
+
+@njit
+def energy(spins, L):
+    E = 0.0
     for i in range(L):
         for j in range(L):
             S = spins[i, j]
-            # right neighbor with wrap-around
-            SR = spins[i, (j+1)%L]
-            # down neighbor with wrap-around
-            SD = spins[(i+1)%L, j]
+            SR = spins[i, (j+1)%L]     # right neighbor
+            SD = spins[(i+1)%L, j]     # down neighbor
             E += -J * S * SR
             E += -J * S * SD
     return E
 
-def energy_change(spins, i, j):
-    # Calculate delta E if spin at (i,j) is flipped
+@njit
+def energy_change(spins, L, i, j):
     S = spins[i, j]
     up = spins[(i-1)%L, j]
     down = spins[(i+1)%L, j]
     left = spins[i, (j-1)%L]
     right = spins[i, (j+1)%L]
-
-    # before flip: contribution = -J * S * (up+down+left+right)
-    # after flip: contribution = -J * (-S) * (up+down+left+right)
-    # deltaE = E_after - E_before = 2 * J * S * (up+down+left+right)
     neighbors_sum = up + down + left + right
-    return 2 * J * S * neighbors_sum
+    # ΔE = 2 * J * S * (sum of neighbors)
+    return 2.0 * J * S * neighbors_sum
 
-# Metropolis updates
-def metropolis_step(spins, T):
-    # pick a random spin
+@njit
+def metropolis_step(spins, L, T):
     i = np.random.randint(L)
     j = np.random.randint(L)
-    dE = energy_change(spins, i, j)
+    dE = energy_change(spins, L, i, j)
     if dE <= 0:
-        # good flip
         spins[i, j] = -spins[i, j]
     else:
-        # flip with probability exp(-dE/(kB*T))
         if np.random.rand() < np.exp(-dE/(kB*T)):
             spins[i, j] = -spins[i, j]
 
-# Example simulation
-# First, thermalize
-for _ in range(100000):
-    metropolis_step(spins, T)
+@njit
+def magnetization(spins):
+    # Numba-friendly mean calculation
+    return spins.mean()
 
-# Now measure
-E_samples = []
-M_samples = []
-for sweep in range(300000):
-    metropolis_step(spins, T)
-    if sweep % 10 == 0:
-        currE = energy(spins)
-        currM = np.mean(spins)
-        E_samples.append(currE)
-        M_samples.append(currM)
+# Data storage
+# We'll store results in dictionaries keyed by L and then by T
+results = {L: {'T': [], 'E': [], 'C': [], 'M': [], 'chi': []} for L in L_values}
 
-E_mean = np.mean(E_samples)
-E2_mean = np.mean([e**2 for e in E_samples])
-M_mean = np.mean(M_samples)
-M2_mean = np.mean([m**2 for m in M_samples])
+# Main simulation loop
+for L in L_values:
+    # We'll store arrays and convert T to a float64 explicitly for Numba
+    temperatures = np.arange(T_min, T_max + T_step, T_step)
+    for T in tqdm(temperatures, desc=f"L={L}"):
+        spins = initialize_spins(L)
+        
+        # Thermalization
+        for _ in range(equil_sweeps):
+            metropolis_step(spins, L, T)
+        
+        E_samples = []
+        M_samples = []
+        
+        # Measurement
+        for sweep in range(measurement_sweeps):
+            metropolis_step(spins, L, T)
+            if sweep % measure_interval == 0:
+                currE = energy(spins, L)
+                currM = spins.mean()  # using .mean() directly here is okay with Numba as well
+                E_samples.append(currE)
+                M_samples.append(currM)
+        
+        E_arr = np.array(E_samples)
+        M_arr = np.array(M_samples)
+        
+        E_mean = E_arr.mean()
+        E2_mean = (E_arr**2).mean()
+        M_mean = M_arr.mean()
+        M2_mean = (M_arr**2).mean()
 
-N = L*L
-C = (E2_mean - E_mean**2) / (N * (T**2)) # specific heat
-chi = (M2_mean - M_mean**2) / (N * T)    # susceptibility
+        N = L*L
+        C = (E2_mean - E_mean**2) / (N * (T**2)) # specific heat
+        chi = (M2_mean - M_mean**2) / (N * T)    # susceptibility
 
-print("At T=", T, "E=", E_mean, "C=", C, "M=", M_mean, "chi=", chi)
+        # Store results
+        results[L]['T'].append(T)
+        results[L]['E'].append(E_mean/N)   # energy per spin
+        results[L]['C'].append(C)
+        results[L]['M'].append(M_mean)
+        results[L]['chi'].append(chi)
+
+for L in L_values:
+    plt.figure()
+    plt.plot(results[L]['T'], results[L]['E'], marker='o', linestyle='-')
+    plt.xlabel('Temperature T')
+    plt.ylabel('Energy per spin')
+    plt.title(f'L={L}')
+    plt.show()
