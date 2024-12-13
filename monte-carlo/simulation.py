@@ -103,11 +103,34 @@ for L in L_values:
         results[L]['C'].append(C)
         results[L]['M'].append(M_mean)
         results[L]['chi'].append(chi)
-
+        
 for L in L_values:
+    # Plot Energy
     plt.figure()
     plt.plot(results[L]['T'], results[L]['E'], marker='o', linestyle='-')
     plt.xlabel('Temperature T')
     plt.ylabel('Energy per spin')
-    plt.title(f'L={L}')
-    plt.show()
+    plt.title(f'L={L} - Energy')
+
+    # Plot Magnetization
+    plt.figure()
+    plt.plot(results[L]['T'], results[L]['M'], marker='o', linestyle='-')
+    plt.xlabel('Temperature T')
+    plt.ylabel('Magnetization per spin')
+    plt.title(f'L={L} - Magnetization')
+
+    # Plot Specific Heat
+    plt.figure()
+    plt.plot(results[L]['T'], results[L]['C'], marker='o', linestyle='-')
+    plt.xlabel('Temperature T')
+    plt.ylabel('Specific Heat C')
+    plt.title(f'L={L} - Specific Heat')
+
+    # Plot Susceptibility
+    plt.figure()
+    plt.plot(results[L]['T'], results[L]['chi'], marker='o', linestyle='-')
+    plt.xlabel('Temperature T')
+    plt.ylabel('Susceptibility χ')
+    plt.title(f'L={L} - Susceptibility')
+
+plt.show()  # Show all plots at the end
