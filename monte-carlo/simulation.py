@@ -37,7 +37,6 @@ def remove_outliers_iqr(data, lower_percentile=25, upper_percentile=75, multipli
     lower_bound = Q1 - multiplier * IQR
     upper_bound = Q3 + multiplier * IQR
     filtered_data = data[(data >= lower_bound) & (data <= upper_bound)]
-    print(f"Outlier Removal: {len(data) - len(filtered_data)} outliers removed.")
     return filtered_data
 
 # Data storage
