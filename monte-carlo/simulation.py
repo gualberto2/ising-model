@@ -68,8 +68,11 @@ def run_simulation(params):
     M_arr = np.array(M_samples, dtype=np.float64)
 
     # Remove outliers with a higher multiplier
-    E_arr = remove_outliers_iqr(E_arr, multiplier=1.5)
-    M_arr = remove_outliers_iqr(M_arr, multiplier=1.5)
+    # E_arr = remove_outliers_iqr(E_arr, multiplier=1.5)
+    # M_arr = remove_outliers_iqr(M_arr, multiplier=1.5)
+    E_arr = remove_outliers_iqr(E_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
+    M_arr = remove_outliers_iqr(M_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
+
 
     # Compute averages
     E_mean = E_arr.mean()
