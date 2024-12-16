@@ -15,12 +15,11 @@ Clone the repository and navigate to the project root directory.
 
 Run `poetry install` to install dependencies.
 
-Activate the virtual environment:
-
-`poetry shell`
+Run `python setup.py build_ext --inplace` if using Cython to build the module. **Recommended**
 
 ## Run the Simulation
 
+Activate the virtual environment:
 Ensure you're in the poetry shell:
 
 `poetry shell`
