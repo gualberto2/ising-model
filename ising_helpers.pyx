@@ -2,7 +2,7 @@
 
 # Cython directives for optimization
 # cython: boundscheck=False, wraparound=False, cdivision=True, nonecheck=False, initializedcheck=False
-# cython: language_level=3
+# cython: language_level=3, boundscheck=False
 
 import numpy as np
 cimport numpy as np
@@ -10,12 +10,6 @@ from libc.math cimport exp
 from libc.stdlib cimport rand, srand, RAND_MAX
 from libc.time cimport time
 from libc.stdint cimport int32_t  # Import int32_t
-
-# Seed the random number generator once at import time
-cdef void seed_rng():
-    srand(<unsigned int>time(NULL))
-
-seed_rng()
 
 # Define module-level constants
 cdef double J = 1.0
@@ -106,3 +100,9 @@ cpdef void simulate_thermalization(int32_t[:, :] spins, int L, double T, long sw
     cdef long sweep
     for sweep in range(sweeps):
         metropolis_step(spins, L, T)
+
+cpdef void seed_rng_custom(unsigned int seed):
+    """
+    Seed the random number generator with a custom seed.
+    """
+    srand(seed)
