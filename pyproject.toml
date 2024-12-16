@@ -12,6 +12,8 @@ matplotlib = "^3.9.3"
 numpy = "1.24.3"
 numba = "0.60.0"
 tqdm = "^4.67.1"
+cython = "^3.0.11"
+setuptools = "^75.6.0"
 
 [build-system]
 requires = ["poetry-core"]
