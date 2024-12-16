@@ -19,11 +19,11 @@ L_values = [10, 16, 24, 36]
 T_min, T_max, T_step = 0.015, 4.5, 0.015
 
 # Simulation parameters
-equil_sweeps = 100_000  # Reduced to 1e5 as per guidelines
+equil_sweeps = 1_000_000  # Reduced to 1e5 as per guidelines
 measurement_sweeps = 300_000  # Number of sweeps for measurement
 measure_interval = 10  # Measure energy, magnetization every 10 sweeps
 
-def remove_outliers_iqr(data, lower_percentile=25, upper_percentile=75, multiplier=1.5):
+def remove_outliers_iqr(data, lower_percentile=25, upper_percentile=75, multiplier=1.0):
     """
     Remove only the most extreme outliers by using a tighter multiplier. 
     This should preserve the main distribution while removing very rare events 
@@ -50,7 +50,7 @@ for L in L_values:
 
     temperatures = np.concatenate([
         np.arange(T_min, critical_temperature - 0.5, T_step),
-        np.arange(critical_temperature - 0.5, critical_temperature + 0.5, T_step / 2),
+        np.arange(critical_temperature - 0.5, critical_temperature + 0.5, T_step / 4),
         np.arange(critical_temperature + 0.5, T_max + T_step, T_step)
     ])
 
