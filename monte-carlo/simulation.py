@@ -11,7 +11,7 @@ from ising_helpers import (
     initialize_spins,
     total_energy,
     total_magnetization,
-    seed_rng_custom,  # Newly added function
+    seed_rng_custom, 
 )
 
 # Physical constants and parameters
@@ -27,7 +27,7 @@ equil_sweeps = 10000000  # Reduced to 1e6 as per guidelines
 measurement_sweeps = 3000000  # Number of sweeps for measurement
 measure_interval = 10  # Measure energy, magnetization every 10 sweeps
 
-def remove_outliers_iqr(data, lower_percentile=25, upper_percentile=75, multiplier=1.0):
+def remove_outliers_iqr(data, lower_percentile=15, upper_percentile=80, multiplier=1.0):
     """
     Remove only the most extreme outliers by using a tighter multiplier. 
     This should preserve the main distribution while removing very rare events 
