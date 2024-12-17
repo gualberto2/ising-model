@@ -1,14 +1,27 @@
-# Use the official Python 3.10 image as the base
-FROM python:3.10
+# Use the official Python 3.10 slim image as the base
+FROM python:3.10-slim
+
+# Set environment variables for Python
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip
+RUN pip install --upgrade pip
 
 # Install necessary Python packages
-RUN pip install --no-cache-dir numpy matplotlib tqdm cython setuptools
+# Ensure that requirements.txt exists in your project directory
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy all project files into the container
-COPY . /app
+# Copy setup.py and the 'monte-carlo' package into the container
+COPY setup.py /app/setup.py
+COPY monte-carlo/ /app/monte-carlo/
 
 # Compile Cython modules
 RUN python setup.py build_ext --inplace
