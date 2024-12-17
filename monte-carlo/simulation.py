@@ -24,6 +24,8 @@ from ising_helpers import (
 J = 1.0      # Interaction strength
 kB = 1.0     # Boltzmann constant
 
+beta_over_nu = 1.75
+
 # Problem parameters
 L_values = [10, 16, 24, 36]
 T_min, T_max, T_step = 0.015, 4.5, 0.015
@@ -163,6 +165,8 @@ def main():
         sorted_C = np.array(results[L]['C'])[sorted_indices]
         sorted_chi = np.array(results[L]['chi'])[sorted_indices]
 
+        scaled_M = (L**beta_over_nu) * sorted_M
+
         # Plot Energy
         plt.figure()
         plt.plot(sorted_T, sorted_E, marker='o', linestyle='none')
@@ -182,6 +186,17 @@ def main():
         if save_plots:
             plt.savefig(os.path.join(plots_dir, f'L_{L}_magnetization.png'), dpi=300)
         plt.close()
+
+        # # New plot: L^(β/ν)*M vs T
+        # Not needed per
+        # plt.figure()
+        # plt.plot(sorted_T, scaled_M, marker='o', linestyle='none', color='r')
+        # plt.xlabel('Temperature T')
+        # plt.ylabel(r'$L^{\beta/\nu} M$')
+        # plt.title(f'L={L} - Scaled Magnetization')
+        # if save_plots:
+        #     plt.savefig(os.path.join(plots_dir, f'L_{L}_scaled_magnetization.png'), dpi=300)
+        # plt.close()
 
         # Plot Specific Heat
         plt.figure()
