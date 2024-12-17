@@ -156,6 +156,11 @@ def main():
                 results[L]['chi'].append(chi)
                 pbar.update(1)
 
+    # Arrays for storing T_c(L) and χ(T_c(L))
+    Tc_values = []
+    chi_Tc_values = []
+    L_sizes = []
+
     # Plotting and summary
     for L in L_values:
         sorted_indices = np.argsort(results[L]['T'])
@@ -165,7 +170,14 @@ def main():
         sorted_C = np.array(results[L]['C'])[sorted_indices]
         sorted_chi = np.array(results[L]['chi'])[sorted_indices]
 
-        scaled_M = (L**beta_over_nu) * sorted_M
+        # Find Tc(L) as the T at max χ
+        max_chi_index = np.argmax(sorted_chi)
+        Tc = sorted_T[max_chi_index]
+        chi_at_Tc = sorted_chi[max_chi_index]
+
+        Tc_values.append(Tc)
+        chi_Tc_values.append(chi_at_Tc)
+        L_sizes.append(L)
 
         # Plot Energy
         plt.figure()
@@ -186,17 +198,6 @@ def main():
         if save_plots:
             plt.savefig(os.path.join(plots_dir, f'L_{L}_magnetization.png'), dpi=300)
         plt.close()
-
-        # # New plot: L^(β/ν)*M vs T
-        # Not needed per
-        # plt.figure()
-        # plt.plot(sorted_T, scaled_M, marker='o', linestyle='none', color='r')
-        # plt.xlabel('Temperature T')
-        # plt.ylabel(r'$L^{\beta/\nu} M$')
-        # plt.title(f'L={L} - Scaled Magnetization')
-        # if save_plots:
-        #     plt.savefig(os.path.join(plots_dir, f'L_{L}_scaled_magnetization.png'), dpi=300)
-        # plt.close()
 
         # Plot Specific Heat
         plt.figure()
@@ -291,6 +292,33 @@ def main():
             print(f"Failed to write top data points to CSV file '{csv_file_path}': {e}")
 
         print("CSV writing process completed.")
+
+    # --------------------------- Additional Plots ---------------------------
+    # Convert to NumPy arrays for convenience
+    Tc_values = np.array(Tc_values)
+    chi_Tc_values = np.array(chi_Tc_values)
+    L_sizes = np.array(L_sizes)
+
+    # Plot T_c(L) vs 1/L
+    if save_plots:
+        plt.figure()
+        plt.plot(1.0/L_sizes, Tc_values, 'o', linestyle='none')
+        plt.xlabel('1/L')
+        plt.ylabel(r'$T_c(L)$')
+        plt.title('T_c(L) vs 1/L')
+        plt.savefig(os.path.join(plots_dir, 'Tc_vs_1overL.png'), dpi=300)
+        plt.close()
+
+        # Plot χ(T_c(L)) vs L on a log-log scale
+        plt.figure()
+        plt.loglog(L_sizes, chi_Tc_values, 'o', linestyle='none')
+        plt.xlabel('L (log scale)')
+        plt.ylabel(r'$\chi(T_c(L))$ (log scale)')
+        plt.title('$\chi(T_c(L))$ vs L (log-log)')
+        plt.savefig(os.path.join(plots_dir, 'chi_Tc_vs_L_loglog.png'), dpi=300)
+        plt.close()
+
+    # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()
