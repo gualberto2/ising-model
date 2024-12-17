@@ -51,10 +51,10 @@ cpdef void metropolis_step(int32_t[:, :] spins, int L, double T):
     cdef int i = rand() % L
     cdef int j = rand() % L
     cdef double dE = energy_change(spins, L, i, j)
-    
+
     cdef double r
     cdef double acceptance_threshold
-    
+
     if dE <= 0:
         spins[i, j] = -spins[i, j]
     else:
@@ -76,22 +76,32 @@ cpdef np.ndarray[int32_t, ndim=2] initialize_spins(int L):
     cdef np.ndarray[int32_t, ndim=2] spins = np.random.choice([-1, 1], size=(L, L)).astype(np.int32)
     return spins
 
-cpdef tuple simulate_measurement(int32_t[:, :] spins, int L, double T, long sweeps, int measure_interval):
-    """
-    Perform measurement sweeps and collect energy and magnetization samples.
-    """
-    cdef list E_samples = []
-    cdef list M_samples = []
-    cdef long sweep
+cpdef simulate_measurement_c(int32_t[:, :] spins, int L, double T, long sweeps, int measure_interval):
+    cdef long num_measures = sweeps // measure_interval + 1
+    cdef np.ndarray[np.float64_t, ndim=1] E_array = np.empty(num_measures, dtype=np.float64)
+    cdef np.ndarray[np.float64_t, ndim=1] M_array = np.empty(num_measures, dtype=np.float64)
+
     cdef double E, M
-    for sweep in range(sweeps):
+    cdef long sweep, measure_count = 0
+
+    # Initial measurements
+    E = compute_energy(spins, L)
+    M = abs(compute_magnetization(spins, L))
+    E_array[measure_count] = E
+    M_array[measure_count] = M
+    measure_count += 1
+
+    for sweep in range(1, sweeps):
         metropolis_step(spins, L, T)
         if sweep % measure_interval == 0:
             E = compute_energy(spins, L)
             M = abs(compute_magnetization(spins, L))
-            E_samples.append(E)
-            M_samples.append(M)
-    return E_samples, M_samples
+            E_array[measure_count] = E
+            M_array[measure_count] = M
+            measure_count += 1
+
+    return E_array, M_array
+
 
 cpdef void simulate_thermalization(int32_t[:, :] spins, int L, double T, long sweeps):
     """
