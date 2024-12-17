@@ -1,16 +1,23 @@
+# Use the official Python 3.10 image as the base
 FROM python:3.10
 
-# Install dependencies
-RUN pip install numpy matplotlib tqdm cython jupyter
+# Install necessary Python packages
+RUN pip install --no-cache-dir numpy matplotlib tqdm cython setuptools
 
-# Set work directory
+# Set the working directory inside the container
 WORKDIR /app
 
-# Copy project files
+# Copy all project files into the container
 COPY . /app
 
-# Compile Cython module
+# Compile Cython modules
 RUN python setup.py build_ext --inplace
 
-# Set default command to launch Jupyter Notebook
-CMD ["jupyter", "notebook", "--ip=0.0.0.0", "--port=8888", "--allow-root"]
+# Create the 'plots' directory inside the container
+RUN mkdir -p /app/plots
+
+# Set PYTHONPATH to include the current directory
+ENV PYTHONPATH=/app
+
+# Set the default command to run the simulation script
+CMD ["python", "monte-carlo/simulation.py"]
