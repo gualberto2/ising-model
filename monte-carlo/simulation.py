@@ -9,14 +9,15 @@ from multiprocessing import Pool, cpu_count
 import itertools
 import argparse
 import time
+import csv  # Import the CSV module
 
 from ising_helpers import (
     simulate_thermalization,
-    simulate_measurement,
+    simulate_measurement_c,
     initialize_spins,
     total_energy,
     total_magnetization,
-    seed_rng_custom, 
+    seed_rng_custom,
 )
 
 # Physical constants and parameters
@@ -28,16 +29,11 @@ L_values = [10, 16, 24, 36]
 T_min, T_max, T_step = 0.015, 4.5, 0.015
 
 # Simulation parameters
-equil_sweeps = 10000000  # Reduced to 1e7 as per guidelines
-measurement_sweeps = 3000000  # Number of sweeps for measurement
-measure_interval = 10  # Measure energy, magnetization every 10 sweeps
+equil_sweeps = 10000000  # Reduced to 1e7
+measurement_sweeps = 3000000
+measure_interval = 10  # Measure every 10 sweeps
 
 def remove_outliers_iqr(data, lower_percentile=15, upper_percentile=80, multiplier=1.0):
-    """
-    Remove only the most extreme outliers by using a tighter multiplier. 
-    This should preserve the main distribution while removing very rare events 
-    that might skew the scale.
-    """
     if len(data) == 0:
         return data
     Q1 = np.percentile(data, lower_percentile)
@@ -54,28 +50,26 @@ def initialize_results():
 # Worker function for parallel processing
 def run_simulation(params):
     L, T, seed = params
-    N = L * L  # Total number of spins
+    N = L * L  # Total spins
 
-    # Seed the RNG uniquely for each process
     seed_rng_custom(seed)
-
-    # Initialize spins
     spins = initialize_spins(L)
 
     # Thermalization
     simulate_thermalization(spins, L, T, equil_sweeps + L**2)
 
     # Measurement
-    E_samples, M_samples = simulate_measurement(spins, L, T, measurement_sweeps, measure_interval)
+    E_arr, M_arr = simulate_measurement_c(spins, L, T, measurement_sweeps, measure_interval)
+    E_samples = E_arr.tolist()
+    M_samples = M_arr.tolist()
 
-    # Convert lists to NumPy arrays for outlier removal and statistics
+    # Convert to NumPy arrays
     E_arr = np.array(E_samples, dtype=np.float64)
     M_arr = np.array(M_samples, dtype=np.float64)
 
-    # Remove outliers with a higher multiplier
+    # Remove outliers
     E_arr = remove_outliers_iqr(E_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
     M_arr = remove_outliers_iqr(M_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
-
 
     # Compute averages
     E_mean = E_arr.mean()
@@ -83,36 +77,47 @@ def run_simulation(params):
     M_mean = M_arr.mean()
     M2_mean = (M_arr**2).mean()
 
-    # Specific heat and susceptibility
     C = (E2_mean - E_mean**2) / (N * (T**2))
     chi = (M2_mean - M_mean**2) / (N * T)
 
-    # Return the results
     return (L, T, E_mean / N, C, M_mean / N, chi)
 
 def generate_seeds(total_jobs):
-    """
-    Generate unique seeds for each job to ensure independent RNG sequences.
-    """
     base_seed = int(time.time())
     return [base_seed + i for i in range(total_jobs)]
 
 def main():
-    # Argument parsing for optional display
     parser = argparse.ArgumentParser(description="Ising Model Simulation")
     parser.add_argument('--save-plots', action='store_true', default=True,
                         help='Save plots to files. (Default: True)')
+    parser.add_argument('--save-csv', action='store_true', default=True,
+                        help='Save simulation data to a CSV file. (Default: True)')
+    parser.add_argument('--csv-path', type=str, default='output/top_results.csv',
+                        help='Path to save the top N CSV file. (Default: output/top_results.csv)')
+    parser.add_argument('--top-n', type=int, default=10,
+                        help='Number of top data points to save per system size L. (Default: 10)')
+    parser.add_argument('--full-csv-path', type=str, default='output/full_results.csv',
+                        help='Path to save the full simulation CSV file. (Default: output/full_results.csv)')
     args = parser.parse_args()
 
     save_plots = args.save_plots
+    save_csv = args.save_csv
+    csv_file_path = args.csv_path
+    top_n = args.top_n
+    full_csv_path = args.full_csv_path
+
+    # Ensure output directory exists
+    os.makedirs("output", exist_ok=True)
 
     if save_plots:
         print("Plot saving enabled: plots will be saved to 'plots/' directory.")
+        plots_dir = "output/plots"
+        os.makedirs(plots_dir, exist_ok=True)
 
-    # Data storage
+    if save_csv:
+        print(f"CSV saving enabled. Top {top_n} data points will be saved to '{csv_file_path}' and all data to '{full_csv_path}'.")
+
     results = initialize_results()
-
-    # Define critical temperature
     critical_temperature = 2.27
 
     # Prepare all (L, T) pairs
@@ -125,40 +130,32 @@ def main():
             np.arange(critical_temperature + 0.5, T_max + T_step, T_step)
         ])
         for T in temperatures:
-            L_T_pairs.append( (L, T) )
-            total_jobs +=1
+            L_T_pairs.append((L, T))
+            total_jobs += 1
 
     seeds = generate_seeds(total_jobs)
     tasks = list(zip([lt[0] for lt in L_T_pairs], [lt[1] for lt in L_T_pairs], seeds))
 
-    # Determine the number of processes (leave one core free)
     num_cpus = cpu_count()
     num_processes = max(1, num_cpus - 1)
 
     print(f"Starting simulation with {num_processes} parallel processes...")
+    print(f"Total simulation jobs: {total_jobs}")
 
-    # Initialize the multiprocessing Pool
+    # Run simulations in parallel
     with Pool(processes=num_processes) as pool:
-        # Use imap_unordered for better performance
-        results_list = []
         with tqdm(total=total_jobs, desc="Simulations") as pbar:
             for result in pool.imap_unordered(run_simulation, tasks):
                 L, T, E, C, M, chi = result
                 results[L]['T'].append(T)
-                results[L]['E'].append(E)        # Energy per spin
+                results[L]['E'].append(E)
                 results[L]['C'].append(C)
-                results[L]['M'].append(M)        # Magnetization per spin
+                results[L]['M'].append(M)
                 results[L]['chi'].append(chi)
                 pbar.update(1)
 
-    # Create 'plots' directory if saving plots
-    if save_plots:
-        plots_dir = "plots"
-        os.makedirs(plots_dir, exist_ok=True)
-
     # Plotting and summary
     for L in L_values:
-        # Sort the results by temperature for plotting
         sorted_indices = np.argsort(results[L]['T'])
         sorted_T = np.array(results[L]['T'])[sorted_indices]
         sorted_E = np.array(results[L]['E'])[sorted_indices]
@@ -236,6 +233,49 @@ def main():
     for L, stats in summary.items():
         print(f"{L:>5} {stats['avg_energy']:>15.5f} {stats['avg_magnetization']:>15.5f} "
               f"{stats['avg_specific_heat']:>15.5f} {stats['avg_susceptibility']:>15.5f}")
+
+    # Write all data points to full CSV
+    if save_csv:
+        print(f"Writing all data points to '{full_csv_path}'...")
+        try:
+            with open(full_csv_path, mode='w', newline='') as full_csv:
+                full_writer = csv.writer(full_csv)
+                full_writer.writerow(['L', 'T', 'Energy_per_spin', 'Specific_Heat', 'Magnetization_per_spin', 'Susceptibility'])
+                for L in L_values:
+                    L_T = results[L]['T']
+                    L_E = results[L]['E']
+                    L_C = results[L]['C']
+                    L_M = results[L]['M']
+                    L_chi = results[L]['chi']
+                    for t, e, c, m, ch in zip(L_T, L_E, L_C, L_M, L_chi):
+                        full_writer.writerow([L, f"{t:.5f}", f"{e:.5f}", f"{c:.5f}", f"{m:.5f}", f"{ch:.5f}"])
+            print(f"All data points have been saved to '{full_csv_path}'.")
+        except Exception as e:
+            print(f"Failed to write all data points to CSV file '{full_csv_path}': {e}")
+
+        # Write top N data points per L
+        print(f"Attempting to write top {top_n} data points per L to CSV file '{csv_file_path}'...")
+        try:
+            with open(csv_file_path, mode='w', newline='') as csv_file:
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(['L', 'T', 'Energy_per_spin', 'Specific_Heat', 'Magnetization_per_spin', 'Susceptibility'])
+                for L in L_values:
+                    L_T = results[L]['T']
+                    L_E = results[L]['E']
+                    L_C = results[L]['C']
+                    L_M = results[L]['M']
+                    L_chi = results[L]['chi']
+                    combined_data = list(zip(L_T, L_E, L_C, L_M, L_chi))
+                    sorted_data = sorted(combined_data, key=lambda x: x[1], reverse=True)
+                    top_data = sorted_data[:top_n]
+                    for data_point in top_data:
+                        T, E, C, M, chi = data_point
+                        csv_writer.writerow([L, f"{T:.5f}", f"{E:.5f}", f"{C:.5f}", f"{M:.5f}", f"{chi:.5f}"])
+            print(f"Top {top_n} data points per L have been saved to '{csv_file_path}'.")
+        except Exception as e:
+            print(f"Failed to write top data points to CSV file '{csv_file_path}': {e}")
+
+        print("CSV writing process completed.")
 
 if __name__ == "__main__":
     main()
