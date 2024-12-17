@@ -1,15 +1,13 @@
 import numpy as np
 import os
 import matplotlib
-# Use the non-interactive Agg backend
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
-import itertools
 import argparse
 import time
-import csv  # Import the CSV module
+import csv
 
 from ising_helpers import (
     simulate_thermalization,
@@ -21,21 +19,29 @@ from ising_helpers import (
 )
 
 # Physical constants and parameters
-J = 1.0      # Interaction strength
-kB = 1.0     # Boltzmann constant
+J = 1.0
+kB = 1.0
 
 beta_over_nu = 1.75
 
-# Problem parameters
 L_values = [10, 16, 24, 36]
 T_min, T_max, T_step = 0.015, 4.5, 0.015
+critical_temperature = 2.27
 
-# Simulation parameters
-equil_sweeps = 10000000  # Reduced to 1e7
-measurement_sweeps = 3000000
-measure_interval = 10  # Measure every 10 sweeps
+# As before, finer steps near Tc
+T_values = {}
+for L in L_values:
+    T_values[L] = np.concatenate([
+        np.arange(T_min, critical_temperature - 0.5, T_step),
+        np.arange(critical_temperature - 0.5, critical_temperature + 0.5, T_step / 5),
+        np.arange(critical_temperature + 0.5, T_max + T_step, T_step)
+    ])
 
-def remove_outliers_iqr(data, lower_percentile=15, upper_percentile=80, multiplier=1.0):
+equil_sweeps = 20000000
+measurement_sweeps = 6000000
+measure_interval = 10
+
+def remove_outliers_iqr(data, lower_percentile=25, upper_percentile=75, multiplier=1.5):
     if len(data) == 0:
         return data
     Q1 = np.percentile(data, lower_percentile)
@@ -49,31 +55,19 @@ def remove_outliers_iqr(data, lower_percentile=15, upper_percentile=80, multipli
 def initialize_results():
     return {L: {'T': [], 'E': [], 'C': [], 'M': [], 'chi': []} for L in L_values}
 
-# Worker function for parallel processing
 def run_simulation(params):
     L, T, seed = params
-    N = L * L  # Total spins
+    N = L * L
 
     seed_rng_custom(seed)
     spins = initialize_spins(L)
-
-    # Thermalization
     simulate_thermalization(spins, L, T, equil_sweeps + L**2)
 
-    # Measurement
     E_arr, M_arr = simulate_measurement_c(spins, L, T, measurement_sweeps, measure_interval)
-    E_samples = E_arr.tolist()
-    M_samples = M_arr.tolist()
+    E_arr = np.array(E_arr, dtype=np.float64)
+    M_arr = np.array(M_arr, dtype=np.float64)
 
-    # Convert to NumPy arrays
-    E_arr = np.array(E_samples, dtype=np.float64)
-    M_arr = np.array(M_samples, dtype=np.float64)
-
-    # Remove outliers
-    E_arr = remove_outliers_iqr(E_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
-    M_arr = remove_outliers_iqr(M_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
-
-    # Compute averages
+    # Compute averages (no outlier removal here, just raw)
     E_mean = E_arr.mean()
     E2_mean = (E_arr**2).mean()
     M_mean = M_arr.mean()
@@ -81,7 +75,6 @@ def run_simulation(params):
 
     C = (E2_mean - E_mean**2) / (N * (T**2))
     chi = (M2_mean - M_mean**2) / (N * T)
-
     return (L, T, E_mean / N, C, M_mean / N, chi)
 
 def generate_seeds(total_jobs):
@@ -108,11 +101,10 @@ def main():
     top_n = args.top_n
     full_csv_path = args.full_csv_path
 
-    # Ensure output directory exists
     os.makedirs("output", exist_ok=True)
 
     if save_plots:
-        print("Plot saving enabled: plots will be saved to 'plots/' directory.")
+        print("Plot saving enabled: plots will be saved to 'output/plots' directory.")
         plots_dir = "output/plots"
         os.makedirs(plots_dir, exist_ok=True)
 
@@ -120,23 +112,16 @@ def main():
         print(f"CSV saving enabled. Top {top_n} data points will be saved to '{csv_file_path}' and all data to '{full_csv_path}'.")
 
     results = initialize_results()
-    critical_temperature = 2.27
 
-    # Prepare all (L, T) pairs
-    L_T_pairs = []
-    total_jobs = 0
+    tasks = []
     for L in L_values:
-        temperatures = np.concatenate([
-            np.arange(T_min, critical_temperature - 0.5, T_step),
-            np.arange(critical_temperature - 0.5, critical_temperature + 0.5, T_step / 10),
-            np.arange(critical_temperature + 0.5, T_max + T_step, T_step)
-        ])
-        for T in temperatures:
-            L_T_pairs.append((L, T))
-            total_jobs += 1
-
+        for T in T_values[L]:
+            tasks.append((L, T, 0))
+    total_jobs = len(tasks)
     seeds = generate_seeds(total_jobs)
-    tasks = list(zip([lt[0] for lt in L_T_pairs], [lt[1] for lt in L_T_pairs], seeds))
+    for i in range(total_jobs):
+        L, T, _ = tasks[i]
+        tasks[i] = (L, T, seeds[i])
 
     num_cpus = cpu_count()
     num_processes = max(1, num_cpus - 1)
@@ -144,7 +129,6 @@ def main():
     print(f"Starting simulation with {num_processes} parallel processes...")
     print(f"Total simulation jobs: {total_jobs}")
 
-    # Run simulations in parallel
     with Pool(processes=num_processes) as pool:
         with tqdm(total=total_jobs, desc="Simulations") as pbar:
             for result in pool.imap_unordered(run_simulation, tasks):
@@ -156,12 +140,7 @@ def main():
                 results[L]['chi'].append(chi)
                 pbar.update(1)
 
-    # Arrays for storing T_c(L) and χ(T_c(L))
-    Tc_values = []
-    chi_Tc_values = []
-    L_sizes = []
-
-    # Plotting and summary
+    # Now filter outliers before plotting C and chi to get cleaner peaks
     for L in L_values:
         sorted_indices = np.argsort(results[L]['T'])
         sorted_T = np.array(results[L]['T'])[sorted_indices]
@@ -170,18 +149,32 @@ def main():
         sorted_C = np.array(results[L]['C'])[sorted_indices]
         sorted_chi = np.array(results[L]['chi'])[sorted_indices]
 
-        # Find Tc(L) as the T at max χ
-        max_chi_index = np.argmax(sorted_chi)
-        Tc = sorted_T[max_chi_index]
-        chi_at_Tc = sorted_chi[max_chi_index]
+        filtered_C = remove_outliers_iqr(sorted_C)
+        filtered_chi = remove_outliers_iqr(sorted_chi)
 
-        Tc_values.append(Tc)
-        chi_Tc_values.append(chi_at_Tc)
-        L_sizes.append(L)
+        def mask_outliers(original, filtered):
+            if len(filtered) == 0:
+                return np.ones_like(original, dtype=bool)
+            Q1 = np.percentile(original, 25)
+            Q3 = np.percentile(original, 75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            return (original >= lower_bound) & (original <= upper_bound)
+
+        mask_C = mask_outliers(sorted_C, filtered_C)
+        mask_chi = mask_outliers(sorted_chi, filtered_chi)
+        combined_mask = mask_C & mask_chi
+
+        T_plot = sorted_T[combined_mask]
+        E_plot = sorted_E[combined_mask]
+        M_plot = sorted_M[combined_mask]
+        C_plot = sorted_C[combined_mask]
+        chi_plot = sorted_chi[combined_mask]
 
         # Plot Energy
         plt.figure()
-        plt.plot(sorted_T, sorted_E, marker='o', linestyle='none')
+        plt.plot(T_plot, E_plot, marker='o', linestyle='none')
         plt.xlabel('Temperature T')
         plt.ylabel('Energy per spin')
         plt.title(f'L={L} - Energy')
@@ -191,7 +184,7 @@ def main():
 
         # Plot Magnetization
         plt.figure()
-        plt.plot(sorted_T, np.abs(sorted_M), marker='o', linestyle='none')
+        plt.plot(T_plot, np.abs(M_plot), marker='o', linestyle='none')
         plt.xlabel('Temperature T')
         plt.ylabel('Magnetization per spin')
         plt.title(f'L={L} - Magnetization')
@@ -199,27 +192,39 @@ def main():
             plt.savefig(os.path.join(plots_dir, f'L_{L}_magnetization.png'), dpi=300)
         plt.close()
 
-        # Plot Specific Heat
+        # Plot Specific Heat (with ylim for L=24 or L=36)
         plt.figure()
-        plt.plot(sorted_T, sorted_C, marker='o', linestyle='none')
+        plt.plot(T_plot, C_plot, marker='o', linestyle='none')
         plt.xlabel('Temperature T')
         plt.ylabel('Specific Heat C')
         plt.title(f'L={L} - Specific Heat')
+
+        # If L=24 or L=36, apply a y-limit based on 95th percentile
+        if L in [24, 36]:
+            upper_limit_C = np.percentile(C_plot, 95)
+            plt.ylim(0, upper_limit_C)
+
         if save_plots:
             plt.savefig(os.path.join(plots_dir, f'L_{L}_specific_heat.png'), dpi=300)
         plt.close()
 
-        # Plot Susceptibility
+        # Plot Susceptibility (with ylim for L=24 or L=36)
         plt.figure()
-        plt.plot(sorted_T, sorted_chi, marker='o', linestyle='none')
+        plt.plot(T_plot, chi_plot, marker='o', linestyle='none')
         plt.xlabel('Temperature T')
         plt.ylabel('Susceptibility χ')
         plt.title(f'L={L} - Susceptibility')
+
+        # If L=24 or L=36, apply a y-limit based on 95th percentile
+        if L in [24, 36]:
+            upper_limit_chi = np.percentile(chi_plot, 95)
+            plt.ylim(0, upper_limit_chi)
+
         if save_plots:
             plt.savefig(os.path.join(plots_dir, f'L_{L}_susceptibility.png'), dpi=300)
         plt.close()
 
-        # Print average values
+        # Print average values (use unfiltered full sets for averages)
         avg_energy = np.mean(results[L]['E'])
         avg_magnetization = np.mean(results[L]['M'])
         avg_specific_heat = np.mean(results[L]['C'])
@@ -233,9 +238,8 @@ def main():
         print("-" * 30)
 
     if save_plots:
-        print("Plots have been saved to the 'plots/' directory.")
+        print("Plots have been saved to the 'output/plots/' directory.")
 
-    # Create and print summary table
     summary = {}
     for L in L_values:
         summary[L] = {
@@ -250,7 +254,6 @@ def main():
         print(f"{L:>5} {stats['avg_energy']:>15.5f} {stats['avg_magnetization']:>15.5f} "
               f"{stats['avg_specific_heat']:>15.5f} {stats['avg_susceptibility']:>15.5f}")
 
-    # Write all data points to full CSV
     if save_csv:
         print(f"Writing all data points to '{full_csv_path}'...")
         try:
@@ -269,7 +272,6 @@ def main():
         except Exception as e:
             print(f"Failed to write all data points to CSV file '{full_csv_path}': {e}")
 
-        # Write top N data points per L
         print(f"Attempting to write top {top_n} data points per L to CSV file '{csv_file_path}'...")
         try:
             with open(csv_file_path, mode='w', newline='') as csv_file:
@@ -292,33 +294,6 @@ def main():
             print(f"Failed to write top data points to CSV file '{csv_file_path}': {e}")
 
         print("CSV writing process completed.")
-
-    # --------------------------- Additional Plots ---------------------------
-    # Convert to NumPy arrays for convenience
-    Tc_values = np.array(Tc_values)
-    chi_Tc_values = np.array(chi_Tc_values)
-    L_sizes = np.array(L_sizes)
-
-    # Plot T_c(L) vs 1/L
-    if save_plots:
-        plt.figure()
-        plt.plot(1.0/L_sizes, Tc_values, 'o', linestyle='none')
-        plt.xlabel('1/L')
-        plt.ylabel(r'$T_c(L)$')
-        plt.title('T_c(L) vs 1/L')
-        plt.savefig(os.path.join(plots_dir, 'Tc_vs_1overL.png'), dpi=300)
-        plt.close()
-
-        # Plot χ(T_c(L)) vs L on a log-log scale
-        plt.figure()
-        plt.loglog(L_sizes, chi_Tc_values, 'o', linestyle='none')
-        plt.xlabel('L (log scale)')
-        plt.ylabel(r'$\chi(T_c(L))$ (log scale)')
-        plt.title('$\chi(T_c(L))$ vs L (log-log)')
-        plt.savefig(os.path.join(plots_dir, 'chi_Tc_vs_L_loglog.png'), dpi=300)
-        plt.close()
-
-    # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()
