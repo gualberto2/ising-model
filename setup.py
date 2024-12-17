@@ -1,10 +1,16 @@
-# setup.py
-
-from setuptools import setup
+from setuptools import setup, Extension
 from Cython.Build import cythonize
 import numpy
 
+extensions = [
+    Extension(
+        "ising_helpers",
+        ["monte-carlo/ising_helpers.pyx"],
+        include_dirs=[numpy.get_include()],
+    )
+]
+
 setup(
-    ext_modules=cythonize("ising_helpers.pyx", compiler_directives={'language_level': "3"}),
-    include_dirs=[numpy.get_include()]
+    name="ising_helpers",
+    ext_modules=cythonize(extensions, compiler_directives={'language_level': "3"}),
 )
