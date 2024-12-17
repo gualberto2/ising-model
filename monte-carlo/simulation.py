@@ -28,14 +28,14 @@ L_values = [10, 16, 24, 36]
 T_min, T_max, T_step = 0.015, 4.5, 0.015
 
 # Simulation parameters
-equil_sweeps = 10000000  # Number of sweeps for equilibration
+equil_sweeps = 10000000  # Reduced to 1e7 as per guidelines
 measurement_sweeps = 3000000  # Number of sweeps for measurement
 measure_interval = 10  # Measure energy, magnetization every 10 sweeps
 
-def remove_outliers_iqr(data, lower_percentile=15, upper_percentile=80, multiplier=1.5):
+def remove_outliers_iqr(data, lower_percentile=15, upper_percentile=80, multiplier=1.0):
     """
     Remove only the most extreme outliers by using a tighter multiplier. 
-    This preserves the main distribution while removing very rare events 
+    This should preserve the main distribution while removing very rare events 
     that might skew the scale.
     """
     if len(data) == 0:
@@ -75,6 +75,7 @@ def run_simulation(params):
     # Remove outliers with a higher multiplier
     E_arr = remove_outliers_iqr(E_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
     M_arr = remove_outliers_iqr(M_arr, lower_percentile=25, upper_percentile=75, multiplier=1.5)
+
 
     # Compute averages
     E_mean = E_arr.mean()
@@ -155,66 +156,86 @@ def main():
         plots_dir = "plots"
         os.makedirs(plots_dir, exist_ok=True)
 
-    # Plotting Specific Heat vs Temperature for Each L
+    # Plotting and summary
     for L in L_values:
         # Sort the results by temperature for plotting
         sorted_indices = np.argsort(results[L]['T'])
         sorted_T = np.array(results[L]['T'])[sorted_indices]
+        sorted_E = np.array(results[L]['E'])[sorted_indices]
+        sorted_M = np.array(results[L]['M'])[sorted_indices]
         sorted_C = np.array(results[L]['C'])[sorted_indices]
+        sorted_chi = np.array(results[L]['chi'])[sorted_indices]
+
+        # Plot Energy
+        plt.figure()
+        plt.plot(sorted_T, sorted_E, marker='o', linestyle='none')
+        plt.xlabel('Temperature T')
+        plt.ylabel('Energy per spin')
+        plt.title(f'L={L} - Energy')
+        if save_plots:
+            plt.savefig(os.path.join(plots_dir, f'L_{L}_energy.png'), dpi=300)
+        plt.close()
+
+        # Plot Magnetization
+        plt.figure()
+        plt.plot(sorted_T, np.abs(sorted_M), marker='o', linestyle='none')
+        plt.xlabel('Temperature T')
+        plt.ylabel('Magnetization per spin')
+        plt.title(f'L={L} - Magnetization')
+        if save_plots:
+            plt.savefig(os.path.join(plots_dir, f'L_{L}_magnetization.png'), dpi=300)
+        plt.close()
 
         # Plot Specific Heat
-        plt.figure(figsize=(8, 6))
-        plt.plot(sorted_T, sorted_C, marker='o', linestyle='-', label=f'L={L}')
+        plt.figure()
+        plt.plot(sorted_T, sorted_C, marker='o', linestyle='none')
         plt.xlabel('Temperature T')
         plt.ylabel('Specific Heat C')
-        plt.title(f'Specific Heat vs Temperature for L={L}')
-        plt.legend()
-        plt.grid(True)
+        plt.title(f'L={L} - Specific Heat')
         if save_plots:
             plt.savefig(os.path.join(plots_dir, f'L_{L}_specific_heat.png'), dpi=300)
         plt.close()
 
-    # Identify and Record C_max Near T_c for Each L
+        # Plot Susceptibility
+        plt.figure()
+        plt.plot(sorted_T, sorted_chi, marker='o', linestyle='none')
+        plt.xlabel('Temperature T')
+        plt.ylabel('Susceptibility χ')
+        plt.title(f'L={L} - Susceptibility')
+        if save_plots:
+            plt.savefig(os.path.join(plots_dir, f'L_{L}_susceptibility.png'), dpi=300)
+        plt.close()
+
+        # Print average values
+        avg_energy = np.mean(results[L]['E'])
+        avg_magnetization = np.mean(results[L]['M'])
+        avg_specific_heat = np.mean(results[L]['C'])
+        avg_susceptibility = np.mean(results[L]['chi'])
+
+        print(f"L={L}:")
+        print(f"  Average Energy per site: {avg_energy:.5f}")
+        print(f"  Average Magnetization per site: {avg_magnetization:.5f}")
+        print(f"  Average Specific Heat: {avg_specific_heat:.5f}")
+        print(f"  Average Susceptibility: {avg_susceptibility:.5f}")
+        print("-" * 30)
+
+    if save_plots:
+        print("Plots have been saved to the 'plots/' directory.")
+
+    # Create and print summary table
     summary = {}
     for L in L_values:
-        T_array = np.array(results[L]['T'])
-        C_array = np.array(results[L]['C'])
-        # Find indices where T is within a small range around T_c
-        delta_T = 0.05  # Define a small range around T_c
-        mask = (T_array >= (critical_temperature - delta_T)) & (T_array <= (critical_temperature + delta_T))
-        if np.any(mask):
-            C_near_Tc = C_array[mask]
-            C_max = C_near_Tc.max()
-            summary[L] = {
-                'C_max': C_max
-            }
-        else:
-            # If no temperatures are within the range, take the maximum C
-            C_max = C_array.max()
-            summary[L] = {
-                'C_max': C_max
-            }
+        summary[L] = {
+            'avg_energy': np.mean(results[L]['E']),
+            'avg_magnetization': np.mean(results[L]['M']),
+            'avg_specific_heat': np.mean(results[L]['C']),
+            'avg_susceptibility': np.mean(results[L]['chi']),
+        }
 
-    # Create and Print Summary Table for C_max
-    print(f"{'L':>5} {'C_max':>15}")
+    print(f"{'L':>5} {'<E>':>15} {'<|M|>':>15} {'<C>':>15} {'<χ>':>15}")
     for L, stats in summary.items():
-        print(f"{L:>5} {stats['C_max']:>15.5f}")
-
-    # Plot C_max vs L to Observe Scaling
-    L_plot = np.array(list(summary.keys()))
-    C_max_plot = np.array([stats['C_max'] for stats in summary.values()])
-
-    plt.figure(figsize=(8, 6))
-    plt.plot(L_plot, C_max_plot, marker='o', linestyle='-', color='blue')
-    plt.xlabel('Lattice Size L')
-    plt.ylabel('Maximum Specific Heat C_max')
-    plt.title('Maximum Specific Heat vs Lattice Size')
-    plt.grid(True)
-    if save_plots:
-        plt.savefig(os.path.join(plots_dir, 'C_max_vs_L.png'), dpi=300)
-    plt.close()
-
-    print(f"Maximum specific heat plot saved as 'C_max_vs_L.png' in the 'plots/' directory.")
+        print(f"{L:>5} {stats['avg_energy']:>15.5f} {stats['avg_magnetization']:>15.5f} "
+              f"{stats['avg_specific_heat']:>15.5f} {stats['avg_susceptibility']:>15.5f}")
 
 if __name__ == "__main__":
     main()
